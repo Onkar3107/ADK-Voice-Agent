@@ -43,6 +43,8 @@ session_service = InMemorySessionService()
 
 # Global Session Map for Voice Users (PhoneNumber -> SessionID)
 USER_SESSION_MAP = {}
+# Temporary stash for inputs during redirect loop
+PENDING_INPUTS = {}
 
 # Run Config
 run_config = RunConfig(
@@ -94,6 +96,45 @@ async def gather_speech(request: Request):
         gather = Gather(input='speech', action='/gather_speech', timeout=3)
         resp.append(gather)
         return Response(content=str(resp), media_type="application/xml")
+
+    # Store input for the processing step
+    PENDING_INPUTS[user_id] = user_text
+
+    # --- LATENCY MASKING ---
+    # Instead of processing immediately (silence), we say something nice,
+    # then Redirect to the actual processing endpoint.
+    
+    # Professional filler phrase
+    resp.say("Thank you. Please bear with me for a moment.")
+    resp.redirect('/process_speech')
+    
+    return Response(content=str(resp), media_type="application/xml")
+
+@app.post("/process_speech")
+async def process_speech(request: Request):
+    """
+    Actual Agent Execution step.
+    Called via TwiML <Redirect> after the acknowledgement.
+    """
+    form = await request.form()
+    # In a redirect, the 'From' should preserved if sent by Twilio, 
+    # but let's be robust.
+    user_id = form.get("From", "local_tester")
+    
+    # Retrieve stashed input
+    user_text = PENDING_INPUTS.get(user_id)
+    
+    if not user_text:
+        logging.warning(f"No pending input found for {user_id}")
+        resp = VoiceResponse()
+        resp.say("I lost your connection. Please say that again.")
+        resp.redirect('/voice') # Restart loop
+        return Response(content=str(resp), media_type="application/xml")
+
+    # Clear stash
+    del PENDING_INPUTS[user_id]
+
+    resp = VoiceResponse()
 
     try:
         # Construct Content object
