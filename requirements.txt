@@ -1,0 +1,11 @@
+fastapi
+uvicorn
+python-multipart
+twilio
+SpeechRecognition
+pyttsx3
+pyaudio
+requests
+beautifulsoup4
+lxml
+python-dotenv
