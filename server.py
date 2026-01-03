@@ -12,7 +12,7 @@ from twilio.rest import Client
 try:
     from agents.root_agent import root_agent
     from google.adk.sessions.in_memory_session_service import InMemorySessionService
-    from agents.root_agent import root_agent
+    from agents.agent_factory import create_agent_graph
     from google.adk.sessions.in_memory_session_service import InMemorySessionService
     from google.adk.agents.invocation_context import InvocationContext
     from google.adk.agents.run_config import RunConfig
@@ -157,6 +157,7 @@ async def get_agent_response(user_id: str, user_text: str) -> str:
         content_obj = Content(role="user", parts=[Part(text=user_text)])
         agent_reply = ""
         
+        
         # 1. Get or Create Session (and Truncate History)
         if user_id in USER_SESSION_MAP:
             session_id = USER_SESSION_MAP[user_id]
@@ -185,9 +186,12 @@ async def get_agent_response(user_id: str, user_text: str) -> str:
         # 2. Key Rotation
         rotate_api_key()
         
-        # 3. Initialize Runner
+        # 3. Create Agent (Dynamic Graph with User ID injected)
+        agent_instance = create_agent_graph(user_id)
+        
+        # 4. Initialize Runner
         runner = Runner(
-            agent=root_agent,
+            agent=agent_instance,
             app_name="voice-agent",
             session_service=session_service
         )
