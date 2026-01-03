@@ -29,10 +29,10 @@ This document outlines the strategy for validating the Voice Agent's functionali
 
 | Test Case | Step | Expected Result | Verified |
 | :--- | :--- | :--- | :--- |
-| **Cloud DB Connect** | Start Server | "Connected to Redis" in logs | [ ] |
-| **Latency Check** | "Check balance" | Filler: "Checking details..." -> Delay -> Correct Balance | [ ] |
-| **Persistence** | "Talk to human" | Ticket ID generated. Check Redis for key `ticket:TICKET-...` | [ ] |
-| **Hangup** | "Thanks bye" | Instant hangup (No Agent Latency) | [ ] |
+| **Cloud DB Connect** | Start Server | "Connected to Redis" in logs | [✓] |
+| **Latency Check** | "Check balance" | Filler: "Checking details..." -> Delay -> Correct Balance | [✓] |
+| **Persistence** | "Talk to human" | Ticket ID generated. Check Redis for key `ticket:TICKET-...` | [✓] |
+| **Hangup** | "Thanks bye" | Instant hangup (No Agent Latency) | [✓] |
 
 ## 4. Performance & Reliability
 *   **Latency**: Cloud Redis adds ~500ms round-trip.
