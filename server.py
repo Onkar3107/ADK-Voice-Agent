@@ -2,6 +2,7 @@ import logging
 import sys
 import uuid
 import os
+import re
 
 from fastapi import FastAPI, Request, Form, BackgroundTasks
 from fastapi.responses import Response, PlainTextResponse
@@ -92,6 +93,39 @@ run_config = RunConfig(
     response_modalities=["text"]
 )
 
+def get_filler_message(text: str) -> str:
+    """Determines a context-aware filler message based on user input."""
+    text = text.lower()
+    
+    if re.search(r"(balance|bill|pay|cost|owing|due)", text):
+        return "I am checking your account details, please wait a moment."
+    
+    if re.search(r"(internet|slow|down|outage|wifi|connect)", text):
+        return "I am checking the network status in your area, one moment please."
+        
+    if re.search(r"(human|agent|operator|person|talk to|speak with|escalate)", text):
+        return "I am connecting you to a human agent, please hold."
+        
+    return "Thank you. Please bear with me for a moment."
+
+def is_goodbye(text: str) -> bool:
+    """Checks if the user wants to end the call."""
+    # Normalize: lowercase and remove punctuation (keep spaces)
+    text = re.sub(r'[^\w\s]', '', text.lower()).strip()
+    
+    # Simple explicit phrases
+    if text in ["bye", "goodbye", "cancel", "end", "hang up", "exit", "quit", "thanks bye", "thank you bye"]:
+        return True
+        
+    # Regex for phrases
+    if re.search(r"^(goodbye|bye|bye\s+bye|see\s+you|talk\s+to\s+you\s+later)$", text):
+        return True
+        
+    if re.search(r"(thank\s+you|thanks)\s+(bye|goodbye)", text):
+        return True
+        
+    return False
+
 @app.post("/voice")
 async def voice_start(request: Request):
     """
@@ -141,12 +175,22 @@ async def gather_speech(request: Request):
     # Store input for the processing step
     PENDING_INPUTS[user_id] = user_text
 
+    # --- INSTANT HANGUP CHECK ---
+    # If user says "Goodbye", hang up immediately without invoking LLM
+    if is_goodbye(user_text):
+        logger.info(f"Detected Goodbye Intent from {user_id}. Hanging up.")
+        resp.say("Thank you for calling. Goodbye!")
+        resp.hangup()
+        return Response(content=str(resp), media_type="application/xml")
+
     # --- LATENCY MASKING ---
     # Instead of processing immediately (silence), we say something nice,
     # then Redirect to the actual processing endpoint.
     
+    
     # Professional filler phrase
-    resp.say("Thank you. Please bear with me for a moment.")
+    filler = get_filler_message(user_text)
+    resp.say(filler)
     resp.redirect('/process_speech')
     
     return Response(content=str(resp), media_type="application/xml")
