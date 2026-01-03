@@ -1,6 +1,7 @@
 import os
 import json
 import redis
+import time
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -54,6 +55,29 @@ class RedisDatabase:
     def get_network_status(self, region: str):
         if not self.client: return "Unknown"
         return self.client.get(f"network:{region}") or "Unknown"
+
+    def create_ticket(self, user_id: str, reason: str, ticket_id: str):
+        """Creates a support ticket in Redis."""
+        if not self.client: return False
+        
+        ticket_data = {
+            "ticket_id": ticket_id,
+            "user_id": user_id,
+            "reason": reason,
+            "status": "OPEN",
+            "created_at": time.time()
+        }
+        
+        # Store ticket details
+        self.client.set(f"ticket:{ticket_id}", json.dumps(ticket_data))
+        
+        # Add to global list of open tickets
+        self.client.rpush("tickets:open", ticket_id)
+        
+        # Add to user's ticket list
+        self.client.rpush(f"tickets:user:{user_id}", ticket_id)
+        
+        return True
 
 # Global DB Instance
 db = RedisDatabase()

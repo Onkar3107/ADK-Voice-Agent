@@ -3,6 +3,7 @@ from google.adk.agents import Agent
 from prompts.system_prompts import ROOT_SYSTEM_PROMPT, TECH_PROMPT, BILLING_PROMPT, ESCALATION_PROMPT
 from tools.billing_tools import check_balance, process_payment
 from tools.network_tools import check_outage, run_diagnostics
+from tools.escalation_tools import escalate_to_human
 from agents.escalation_agent import escalation_agent # We can reuse this one if it has no tools/state, or recreate it.
 # Actually, let's just recreate them all to be safe.
 
@@ -40,12 +41,12 @@ def create_agent_graph(user_id: str) -> Agent:
         tools=[check_outage, run_diagnostics]
     )
     
-    # 3. Escalation Agent (Simple)
-    # Reusing the simple definition or creating new
+    # 3. Escalation Agent
     escalation = Agent(
         name="EscalationAgent",
         instruction=inject_id(ESCALATION_PROMPT),
-        model=MODEL_NAME
+        model=MODEL_NAME,
+        tools=[escalate_to_human]
     )
 
     # 4. Root Dispatcher
