@@ -3,8 +3,11 @@ import sys
 import uuid
 import os
 import re
+import google.generativeai as genai
 
 from fastapi import FastAPI, Request, Form, BackgroundTasks
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 from fastapi.responses import Response, PlainTextResponse
 from twilio.twiml.voice_response import VoiceResponse, Gather, Play
 from twilio.rest import Client
@@ -75,6 +78,8 @@ def rotate_api_key():
         selected_key = random.choice(API_KEYS)
         # Set into environment so Gemini / GoogleGenAI client picks it up
         os.environ["GOOGLE_API_KEY"] = selected_key
+        # FORCE Re-configuration of the library
+        genai.configure(api_key=selected_key)
         logger.info(f"Rotated API Key: ...{selected_key[-4:]}")
     else:
         logger.warning("No API Keys configured for rotation.")
@@ -92,6 +97,26 @@ PENDING_INPUTS = {}
 run_config = RunConfig(
     response_modalities=["text"]
 )
+
+# --- CORS SETUP (For Web UI) ---
+origins = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "*"  # Allow all for dev
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# --- DATA MODELS ---
+class ChatRequest(BaseModel):
+    text: str
+    user_id: str = "web_user"
 
 def get_filler_message(text: str) -> str:
     """Determines a context-aware filler message based on user input."""
@@ -194,6 +219,23 @@ async def gather_speech(request: Request):
     resp.redirect('/process_speech')
     
     return Response(content=str(resp), media_type="application/xml")
+
+@app.post("/local/chat")
+async def chat_endpoint(request: ChatRequest):
+    """
+    API Endpoint for the Web UI.
+    Receives JSON: {"text": "...", "user_id": "..."}
+    Returns JSON: {"reply": "..."}
+    """
+    user_text = request.text
+    user_id = request.user_id
+    
+    logger.info(f"Chat received from {user_id}: {user_text}")
+
+    # Recycle the exact same agent logic used by voice
+    agent_reply = await get_agent_response(user_id, user_text)
+    
+    return {"reply": agent_reply}
 
 async def get_agent_response(user_id: str, user_text: str) -> str:
     """Core logic to run the ADK Agent (Session + Runner)."""
