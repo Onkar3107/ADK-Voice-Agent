@@ -99,11 +99,17 @@ run_config = RunConfig(
 )
 
 # --- CORS SETUP (For Web UI) ---
-origins = [
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-    "*"  # Allow all for dev
-]
+# Retrieve from env, e.g. "http://localhost:5173,https://myapp.com"
+cors_env = os.environ.get("CORS_ORIGINS", "")
+if cors_env:
+    origins = [origin.strip() for origin in cors_env.split(",") if origin.strip()]
+else:
+    # Default fallback for local dev if env var is missing
+    origins = [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "*" 
+    ]
 
 app.add_middleware(
     CORSMiddleware,
