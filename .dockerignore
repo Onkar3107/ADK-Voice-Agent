@@ -7,3 +7,15 @@ __pycache__
 venv/
 env/
 *.log
+# Production Exclusions
+local_tester.py
+text_to_speech_tester.py
+tests/
+*.md
+dummy.txt
+image.png
+seed_db.py
+.pytest_cache/
+.adk/
+server.log
+pytest.ini
