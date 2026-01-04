@@ -119,6 +119,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# --- HEALTH CHECKS ---
+@app.get("/")
+async def root():
+    """Health check for Render/Cloud Run."""
+    return {"status": "ok", "message": "Voice Agent is running"}
+
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
+
+
 # --- DATA MODELS ---
 class ChatRequest(BaseModel):
     text: str
