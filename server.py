@@ -240,7 +240,9 @@ async def chat_endpoint(request: ChatRequest):
 async def get_agent_response(user_id: str, user_text: str) -> str:
     """Core logic to run the ADK Agent (Session + Runner)."""
     try:
-        content_obj = Content(role="user", parts=[Part(text=user_text)])
+        # Prepend User ID to the text so the System Prompt context is satisfied
+        full_text = f"User ID: {user_id}\n{user_text}"
+        content_obj = Content(role="user", parts=[Part(text=full_text)])
         agent_reply = ""
         
         
