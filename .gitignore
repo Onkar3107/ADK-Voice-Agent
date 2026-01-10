@@ -32,6 +32,7 @@ env/
 # ========================
 .DS_Store
 Thumbs.db
+*.db
 
 # ========================
 # ADK / Runtime / Local DB
