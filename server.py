@@ -22,6 +22,9 @@ try:
     from google.adk.agents.run_config import RunConfig
     from google.adk.runners import Runner
     
+    # RL Service
+    from services.rl_service import RLService
+
     # GenAI Types
     from google.genai.types import Content, Part
     from google.adk.models.google_llm import Gemini
@@ -85,8 +88,10 @@ def rotate_api_key():
         logger.warning("No API Keys configured for rotation.")
 
 # Initialize Session Service
-# InMemoryService is suitable for local dev/testing.
 session_service = InMemorySessionService()
+
+# Initialize RL Service
+rl_service = RLService()
 
 # Global Session Map for Voice Users (PhoneNumber -> SessionID)
 USER_SESSION_MAP = {}
@@ -176,6 +181,13 @@ async def voice_start(request: Request):
     """
     logger.info("Received new call /voice")
     
+    form = await request.form()
+    call_sid = form.get("CallSid", "local_tester")
+    
+    # RL: Start Tracking
+    rl_service.start_call(call_sid)
+    rl_service.update_status(call_sid, "LISTENING")
+    
     resp = VoiceResponse()
     
     # 1. Greet the User
@@ -201,10 +213,17 @@ async def gather_speech(request: Request):
     """
     form = await request.form()
     user_text = form.get("SpeechResult")
-    # For local testing, 'From' might not be present or unique, so use a static ID or 'From'
     user_id = form.get("From", "local_tester")
+    call_sid = form.get("CallSid", "local_tester")
     
     logger.info(f"Received Speech Input: '{user_text}' from {user_id}")
+
+    logger.info(f"Received Speech Input: '{user_text}' from {user_id}")
+
+    # RL: If we got here, the user replied -> Previous turn success
+    rl_service.process_turn_success(call_sid)
+    rl_service.update_status(call_sid, "PROCESSING")
+    rl_service.log_chat(call_sid, "user", user_text)
 
     resp = VoiceResponse()
 
@@ -228,7 +247,6 @@ async def gather_speech(request: Request):
     # --- LATENCY MASKING ---
     # Instead of processing immediately (silence), we say something nice,
     # then Redirect to the actual processing endpoint.
-    
     
     # Professional filler phrase
     filler = get_filler_message(user_text)
@@ -261,7 +279,6 @@ async def get_agent_response(user_id: str, user_text: str) -> str:
         full_text = f"User ID: {user_id}\n{user_text}"
         content_obj = Content(role="user", parts=[Part(text=full_text)])
         agent_reply = ""
-        
         
         # 1. Get or Create Session (and Truncate History)
         if user_id in USER_SESSION_MAP:
@@ -324,6 +341,12 @@ async def get_agent_response(user_id: str, user_text: str) -> str:
         if not agent_reply:
              agent_reply = "I'm thinking, but I have no response."
              
+        # RL: Log Assistant Reply
+        # We need the user_id's session. But here we only have user_id, not call_sid.
+        # However, logic calling this usually has access to call_sid if passed or mapped.
+        # Refactor: get_agent_response doesn't take call_sid.
+        # We can just return reply and let caller log it.
+             
         return agent_reply
 
     except Exception as e:
@@ -334,11 +357,20 @@ async def handle_async_agent(user_id: str, user_text: str, call_sid: str, base_u
     """Background Task: Runs agent -> Updates Live Call."""
     logger.info(f"Starting Async Agent logic for CallSid: {call_sid}")
     
+    # RL: Still Thinking
+    rl_service.update_status(call_sid, "THINKING")
+    
+    agent_response_text = await get_agent_response(user_id, user_text)
+    
     agent_response_text = await get_agent_response(user_id, user_text)
     
     logger.info(f"Async Agent Response Ready: '{agent_response_text}'")
     
+    # RL: Log Agent Reply
+    rl_service.log_chat(call_sid, "assistant", agent_response_text)
+    
     try:
+        # Build TwiML to interrupt the hold music and speak result
         # Build TwiML to interrupt the hold music and speak result
         # NOTE: When pushing TwiML via API, relative URLs might fail. 
         # We must use the absolute URL for the Gather action.
@@ -358,6 +390,10 @@ async def handle_async_agent(user_id: str, user_text: str, call_sid: str, base_u
         # Update the live call
         call = twilio_client.calls(call_sid).update(twiml=str(new_twiml))
         logger.info(f"Successfully updated Call {call_sid} with Agent Response.")
+        
+        # RL: Thinking Done -> Speaking
+        rl_service.update_status(call_sid, "SPEAKING")
+        rl_service.log_event(call_sid, "THINKING_END")
         
     except Exception as e:
         logger.error(f"Failed to update Twilio Call {call_sid}: {e}")
@@ -395,10 +431,17 @@ async def process_speech(request: Request, background_tasks: BackgroundTasks):
         # Blocking call
         agent_reply = await get_agent_response(user_id, user_text)
         
+        # RL: Log Agent Reply
+        rl_service.log_chat(call_sid, "assistant", agent_reply)
+        
         resp = VoiceResponse()
         resp.say(agent_reply)
         gather = Gather(input='speech', action='/gather_speech', timeout=3)
         resp.append(gather)
+        
+        # RL: Sync Thinking Done
+        rl_service.update_status(call_sid, "SPEAKING")
+        
         return Response(content=str(resp), media_type="application/xml")
         
     else:
@@ -407,6 +450,11 @@ async def process_speech(request: Request, background_tasks: BackgroundTasks):
         # 1. Trigger Background Task
         # Pass the base_url so we can construct absolute callbacks
         base_url = str(request.base_url)
+        
+        # RL: Start Thinking (Async)
+        rl_service.update_status(call_sid, "THINKING")
+        rl_service.log_event(call_sid, "THINKING_START")
+        
         background_tasks.add_task(handle_async_agent, user_id, user_text, call_sid, base_url)
         
         # 2. Return Hold Music TwiML immediately
@@ -425,6 +473,27 @@ async def process_speech(request: Request, background_tasks: BackgroundTasks):
         resp.hangup()
         
         return Response(content=str(resp), media_type="application/xml")
+
+@app.post("/status_callback")
+async def status_callback(request: Request, background_tasks: BackgroundTasks):
+    """
+    Receives Call Status updates from Twilio (completed, busy, failed).
+    Used for RL Penalty calculation (Thinking Hangup).
+    """
+    form = await request.form()
+    call_sid = form.get("CallSid")
+    call_status = form.get("CallStatus")
+    
+    logger.info(f"Status Callback: {call_sid} -> {call_status}")
+    
+    if call_status == "completed":
+        # Check if user hung up during critical phase
+        rl_service.process_hangup(call_sid, call_status)
+        
+        # RL: Trigger Self-Reflection in Background
+        background_tasks.add_task(rl_service.analyze_and_learn, call_sid)
+        
+    return Response(status_code=200)
 
 if __name__ == "__main__":
     import uvicorn

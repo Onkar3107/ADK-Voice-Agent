@@ -3,7 +3,12 @@ from google.adk.agents import Agent
 from prompts.system_prompts import ROOT_SYSTEM_PROMPT, TECH_PROMPT, BILLING_PROMPT, ESCALATION_PROMPT
 from tools.billing_tools import check_balance, process_payment
 from tools.network_tools import check_outage, run_diagnostics
+from tools.network_tools import check_outage, run_diagnostics
 from tools.escalation_tools import escalate_to_human
+from services.rl_service import RLService
+
+# Initialize RL Service for learning injections
+rl_service = RLService()
 from agents.escalation_agent import escalation_agent # We can reuse this one if it has no tools/state, or recreate it.
 # Actually, let's just recreate them all to be safe.
 
@@ -11,9 +16,9 @@ from agents.escalation_agent import escalation_agent # We can reuse this one if 
 try:
     from dotenv import load_dotenv
     load_dotenv()
-    MODEL_NAME = os.environ.get("GOOGLE_GENAI_MODEL", "gemini-2.0-flash")
+    MODEL_NAME = os.environ.get("GOOGLE_GENAI_MODEL", "gemini-2.0-flash-exp")
 except ImportError:
-    MODEL_NAME = "gemini-2.0-flash"
+    MODEL_NAME = "gemini-2.0-flash-exp"
 
 def create_agent_graph(user_id: str) -> Agent:
     """
@@ -50,9 +55,12 @@ def create_agent_graph(user_id: str) -> Agent:
     )
 
     # 4. Root Dispatcher
+    # Inject Learned Rules
+    learned_guidelines = rl_service.get_active_rules()
+    
     root = Agent(
         name="RootDispatcher",
-        instruction=inject_id(ROOT_SYSTEM_PROMPT),
+        instruction=inject_id(ROOT_SYSTEM_PROMPT + learned_guidelines),
         model=MODEL_NAME,
         sub_agents=[tech, billing, escalation]
     )
